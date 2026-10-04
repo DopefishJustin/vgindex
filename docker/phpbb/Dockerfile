@@ -34,7 +34,7 @@ COPY docker/apache/mpm_prefork.conf /etc/apache2/mods-available/mpm_prefork.conf
 
 RUN set -eux; \
     curl -fsSL -o /tmp/phpbb.zip \
-        "https://download.phpbb.com/pub/release/3.3/${PHPBB_VERSION}/phpBB-${PHPBB_VERSION}.zip"; \
+        "https://download.phpbb.com/pub/release/3.3/${PHPBB_VERSION}/phpBB-${PHPBB_VERSION}.zip?download=1"; \
     unzip /tmp/phpbb.zip -d /tmp; \
     rm -rf /var/www/html/*; \
     cp -a /tmp/phpBB3/. /var/www/html/; \
