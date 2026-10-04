@@ -474,8 +474,8 @@ fn hash_field_for_term(term: &str) -> Option<HashField> {
 fn quick_search_clause(bind_idx: u32, hash_candidate_bind_idx: Option<u32>) -> String {
     let bind = format!("${bind_idx}");
     let mut clause = format!(
-        r#"(LOWER(d.title) LIKE '%' || {bind} || '%'
-             OR LOWER(d.title_foreign) LIKE '%' || {bind} || '%'
+        r#"(public.unaccent_lower(d.title) LIKE '%' || public.unaccent_lower({bind}) || '%'
+             OR public.unaccent_lower(d.title_foreign) LIKE '%' || public.unaccent_lower({bind}) || '%'
              OR compact_disc_array_search(d.serial) LIKE '%' || {bind} || '%'"#
     );
 
@@ -564,9 +564,11 @@ fn title_text_search_clause(field: TitleTextField, bind_idx: u32, exact: bool) -
         TitleTextField::ForeignTitle => ("title_foreign", Some("has_title_foreign")),
     };
     let predicate = if exact {
-        format!("d.{column} = ${bind_idx}")
+        format!("public.unaccent_lower(d.{column}) = public.unaccent_lower(${bind_idx})")
     } else {
-        format!("LOWER(d.{column}) LIKE '%' || LOWER(${bind_idx}) || '%'")
+        format!(
+            "public.unaccent_lower(d.{column}) LIKE '%' || public.unaccent_lower(${bind_idx}) || '%'"
+        )
     };
 
     match capability {
@@ -2972,8 +2974,8 @@ mod tests {
     fn quick_search_clause_for_text_terms_uses_only_indexed_title_foreign_title_and_serial() {
         let clause = quick_search_clause(3, None);
 
-        assert!(clause.contains("LOWER(d.title) LIKE"));
-        assert!(clause.contains("LOWER(d.title_foreign) LIKE"));
+        assert!(clause.contains("public.unaccent_lower(d.title) LIKE"));
+        assert!(clause.contains("public.unaccent_lower(d.title_foreign) LIKE"));
         assert!(clause.contains("compact_disc_array_search(d.serial) LIKE"));
         assert!(!clause.contains("disc_title"));
         assert!(!clause.contains("barcode"));
@@ -3116,19 +3118,19 @@ mod tests {
     fn title_text_clauses_use_base_columns_and_gate_foreign_titles() {
         assert_eq!(
             title_text_search_clause(TitleTextField::Title, 5, false),
-            "LOWER(d.title) LIKE '%' || LOWER($5) || '%'"
+            "public.unaccent_lower(d.title) LIKE '%' || public.unaccent_lower($5) || '%'"
         );
         assert_eq!(
             title_text_search_clause(TitleTextField::Title, 5, true),
-            "d.title = $5"
+            "public.unaccent_lower(d.title) = public.unaccent_lower($5)"
         );
         assert_eq!(
             title_text_search_clause(TitleTextField::ForeignTitle, 6, false),
-            "(s.has_title_foreign AND LOWER(d.title_foreign) LIKE '%' || LOWER($6) || '%')"
+            "(s.has_title_foreign AND public.unaccent_lower(d.title_foreign) LIKE '%' || public.unaccent_lower($6) || '%')"
         );
         assert_eq!(
             title_text_search_clause(TitleTextField::ForeignTitle, 6, true),
-            "(s.has_title_foreign AND d.title_foreign = $6)"
+            "(s.has_title_foreign AND public.unaccent_lower(d.title_foreign) = public.unaccent_lower($6))"
         );
     }
 
@@ -3156,8 +3158,14 @@ mod tests {
         );
 
         assert_eq!(bind_idx, 7);
-        assert_eq!(clauses[0], "LOWER(d.title) LIKE '%' || LOWER($5) || '%'");
-        assert_eq!(clauses[1], "(s.has_title_foreign AND d.title_foreign = $6)");
+        assert_eq!(
+            clauses[0],
+            "public.unaccent_lower(d.title) LIKE '%' || public.unaccent_lower($5) || '%'"
+        );
+        assert_eq!(
+            clauses[1],
+            "(s.has_title_foreign AND public.unaccent_lower(d.title_foreign) = public.unaccent_lower($6))"
+        );
         assert!(clauses[2].contains("unnest(d.serial)"));
         assert!(clauses[2].contains("$7"));
     }
@@ -3586,6 +3594,12 @@ mod tests {
         assert!(ring_field_indexes.contains("DROP INDEX idx_ring_layers_search_trgm"));
         assert!(ring_field_indexes
             .contains("DROP FUNCTION public.ringcode_layer_search_text(TEXT, TEXT)"));
+
+        let title_search =
+            include_str!("../../migrations/023_accent_insensitive_title_search.sql");
+        assert!(title_search.contains("unaccent_lower"));
+        assert!(title_search.contains("idx_discs_title_unaccent_trgm"));
+        assert!(title_search.contains("idx_discs_title_foreign_unaccent_trgm"));
     }
 
     #[tokio::test]
